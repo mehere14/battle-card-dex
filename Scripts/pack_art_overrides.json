@@ -1,0 +1,45 @@
+{
+  "aliases": {
+    "base1": "Base Set",
+    "ecard1": "Expedition",
+    "ex1": "EX Ruby & Sapphire",
+    "ex2": "EX Sandstorm",
+    "ex3": "EX Dragon",
+    "ex4": "EX Team Magma VS Team Aqua",
+    "ex5": "EX Hidden Legends",
+    "ex6": "EX FireRed & LeafGreen",
+    "ex7": "EX Team Rocket Returns",
+    "ex8": "EX Deoxys",
+    "ex9": "EX Emerald",
+    "ex10": "EX Unseen Forces",
+    "ex11": "EX Delta Species",
+    "ex12": "EX Legend Maker",
+    "ex13": "EX Holon Phantoms",
+    "ex14": "EX Crystal Guardians",
+    "ex15": "EX Dragon Frontiers",
+    "ex16": "EX Power Keepers",
+    "hgss2": "Unleashed",
+    "hgss3": "Undaunted",
+    "hgss4": "Triumphant",
+    "xy1": "X & Y"
+  },
+  "assignments": {
+    "pop1": { "source_name": "POP Series", "source_index": 1, "variant_indices": [1] },
+    "pop2": { "source_name": "POP Series", "source_index": 1, "variant_indices": [2] },
+    "pop3": { "source_name": "POP Series", "source_index": 1, "variant_indices": [3] },
+    "pop4": { "source_name": "POP Series", "source_index": 1, "variant_indices": [4] },
+    "pop5": { "source_name": "POP Series", "source_index": 1, "variant_indices": [5] },
+    "pop6": { "source_name": "POP Series", "source_index": 2, "variant_indices": [1] },
+    "pop7": { "source_name": "POP Series", "source_index": 2, "variant_indices": [2] },
+    "pop8": { "source_name": "POP Series", "source_index": 2, "variant_indices": [3] },
+    "pop9": { "source_name": "POP Series", "source_index": 2, "variant_indices": [4] },
+    "zsv10pt5": {
+      "source_name": "Black Bolt & White Flare",
+      "variant_indices": [1]
+    },
+    "rsv10pt5": {
+      "source_name": "Black Bolt & White Flare",
+      "variant_indices": [2]
+    }
+  }
+}
