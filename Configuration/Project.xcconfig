@@ -1,0 +1,5 @@
+// Safe defaults. Override privately in Local.xcconfig on this machine.
+APP_DEVELOPMENT_TEAM =
+APP_BUNDLE_IDENTIFIER = com.example.BattleCardDex
+APP_CLOUDKIT_CONTAINER_IDENTIFIER = iCloud.com.example.BattleCardDex
+#include? "Local.xcconfig"

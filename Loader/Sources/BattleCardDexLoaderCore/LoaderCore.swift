@@ -33,6 +33,7 @@ public enum LoaderCommand: Equatable, Sendable {
     case syncAll
     case syncPackArtwork
     case syncCardIndexes
+    case promoteProduction(apply: Bool)
     case validate
     case dryRun(range: IndexRange?)
     case effectAudit(range: IndexRange, output: String)
@@ -44,6 +45,7 @@ public enum LoaderCommand: Equatable, Sendable {
         case .syncAll: "sync --all"
         case .syncPackArtwork: "sync-pack-artwork"
         case .syncCardIndexes: "sync-card-indexes"
+        case .promoteProduction: "promote-production"
         case .validate: "validate"
         case .dryRun: "dry-run"
         case .effectAudit: "effect-audit"
@@ -64,7 +66,7 @@ public enum LoaderCommand: Equatable, Sendable {
         // Live validation is a signed, read-only CloudKit Web Services query.
         // It needs the same external server-to-server credentials as a loader
         // publication, but has no records/modify operation.
-        case .seed, .sync, .syncAll, .syncPackArtwork, .syncCardIndexes, .validate: true
+        case .seed, .sync, .syncAll, .syncPackArtwork, .syncCardIndexes, .promoteProduction, .validate: true
         case .dryRun, .effectAudit: false
         }
     }
@@ -83,6 +85,11 @@ public enum LoaderCommand: Equatable, Sendable {
                 throw LoaderCommandError.invalidArguments("sync requires --range LOWER...UPPER or --all")
             }
             return .sync(range: try parseRange(arguments[2]))
+        case "promote-production":
+            guard arguments.count == 2, ["--dry-run", "--apply"].contains(arguments[1]) else {
+                throw LoaderCommandError.invalidArguments("promote-production requires --dry-run or --apply")
+            }
+            return .promoteProduction(apply: arguments[1] == "--apply")
         case "validate":
             guard arguments.count == 1 else { throw LoaderCommandError.invalidArguments("validate takes no arguments") }
             return .validate
@@ -135,25 +142,39 @@ public enum LoaderCommandError: Error, Equatable, CustomStringConvertible, Senda
 }
 
 public enum LoaderSecretKey: String, CaseIterable, Hashable, Sendable {
+    case cloudKitContainerIdentifier = "BATTLE_CARD_DEX_CLOUDKIT_CONTAINER_IDENTIFIER"
     case cardSourceAPIKey = "BATTLE_CARD_DEX_CARD_SOURCE_API_KEY"
     case cloudKitKeyID = "BATTLE_CARD_DEX_CLOUDKIT_KEY_ID"
     case cloudKitPrivateKeyPath = "BATTLE_CARD_DEX_CLOUDKIT_PRIVATE_KEY_PATH"
+    case productionKeyID = "BATTLE_CARD_DEX_PRODUCTION_CLOUDKIT_KEY_ID"
+    case productionPrivateKeyPath = "BATTLE_CARD_DEX_PRODUCTION_CLOUDKIT_PRIVATE_KEY_PATH"
 }
 
 public struct LoaderSecrets: Equatable, Sendable {
+    public let cloudKitContainerIdentifier: String
     public let cardSourceAPIKey: String?
     public let cloudKitKeyID: String?
     public let cloudKitPrivateKeyPath: String?
+    public let productionKeyID: String?
+    public let productionPrivateKeyPath: String?
 
-    public init(cardSourceAPIKey: String? = nil, cloudKitKeyID: String? = nil, cloudKitPrivateKeyPath: String? = nil) {
+    public init(cardSourceAPIKey: String? = nil, cloudKitKeyID: String? = nil, cloudKitPrivateKeyPath: String? = nil, productionKeyID: String? = nil, productionPrivateKeyPath: String? = nil, cloudKitContainerIdentifier: String? = nil) {
+        self.cloudKitContainerIdentifier = Self.cleaned(cloudKitContainerIdentifier) ?? "iCloud.com.example.BattleCardDex"
         self.cardSourceAPIKey = Self.cleaned(cardSourceAPIKey)
         self.cloudKitKeyID = Self.cleaned(cloudKitKeyID)
         self.cloudKitPrivateKeyPath = Self.cleaned(cloudKitPrivateKeyPath)
+        self.productionKeyID = Self.cleaned(productionKeyID)
+        self.productionPrivateKeyPath = Self.cleaned(productionPrivateKeyPath)
     }
 
     public func missingRequiredValues(for command: LoaderCommand) -> [LoaderSecretKey] {
         guard command.requiresSecrets else { return [] }
-        return [
+        var missing: [LoaderSecretKey] = []
+        if case .promoteProduction = command, productionKeyID != nil || productionPrivateKeyPath != nil {
+            if productionKeyID == nil { missing.append(.productionKeyID) }
+            if productionPrivateKeyPath == nil { missing.append(.productionPrivateKeyPath) }
+        }
+        return missing + [
             cloudKitKeyID == nil ? .cloudKitKeyID : nil,
             cloudKitPrivateKeyPath == nil ? .cloudKitPrivateKeyPath : nil
         ].compactMap { $0 }
@@ -164,6 +185,8 @@ public struct LoaderSecrets: Equatable, Sendable {
         if cardSourceAPIKey != nil { result[LoaderSecretKey.cardSourceAPIKey.rawValue] = "[REDACTED]" }
         if cloudKitKeyID != nil { result[LoaderSecretKey.cloudKitKeyID.rawValue] = "[REDACTED]" }
         if cloudKitPrivateKeyPath != nil { result[LoaderSecretKey.cloudKitPrivateKeyPath.rawValue] = "[REDACTED_PATH]" }
+        if productionKeyID != nil { result[LoaderSecretKey.productionKeyID.rawValue] = "[REDACTED]" }
+        if productionPrivateKeyPath != nil { result[LoaderSecretKey.productionPrivateKeyPath.rawValue] = "[REDACTED_PATH]" }
         return result
     }
 
@@ -206,7 +229,7 @@ public struct KeychainSecretStore: SecretStore {
 }
 
 public struct LoaderSecretResolver: Sendable {
-    public static let service = "com.askcruit.Battle-Card-Dex.loader"
+    public static let service = "com.example.BattleCardDex.loader"
     public static let localFileName = ".env.local"
 
     private let environment: [String: String]
@@ -239,7 +262,10 @@ public struct LoaderSecretResolver: Sendable {
         return LoaderSecrets(
             cardSourceAPIKey: value(.cardSourceAPIKey),
             cloudKitKeyID: value(.cloudKitKeyID),
-            cloudKitPrivateKeyPath: value(.cloudKitPrivateKeyPath)
+            cloudKitPrivateKeyPath: value(.cloudKitPrivateKeyPath),
+            productionKeyID: value(.productionKeyID),
+            productionPrivateKeyPath: value(.productionPrivateKeyPath),
+            cloudKitContainerIdentifier: value(.cloudKitContainerIdentifier)
         )
     }
 
@@ -278,14 +304,18 @@ public struct LoaderConfiguration: Equatable, Sendable {
         let missing = secrets.missingRequiredValues(for: command)
         guard missing.isEmpty else { throw LoaderPreflightError.missingSecrets(missing) }
         guard command.requiresSecrets, let path = secrets.cloudKitPrivateKeyPath else { return }
-        let keyURL = URL(fileURLWithPath: path)
-        guard keyURL.path.hasPrefix("/") else { throw LoaderPreflightError.privateKeyPathMustBeAbsolute }
-        if let repositoryRoot, keyURL.standardizedFileURL.path.hasPrefix(repositoryRoot.standardizedFileURL.path + "/") {
-            throw LoaderPreflightError.privateKeyInsideRepository
-        }
-        var isDirectory: ObjCBool = false
-        guard fileManager.fileExists(atPath: keyURL.path, isDirectory: &isDirectory), !isDirectory.boolValue else {
-            throw LoaderPreflightError.privateKeyNotFound(keyURL.path)
+        var paths = [path]
+        if case .promoteProduction = command, let productionPath = secrets.productionPrivateKeyPath { paths.append(productionPath) }
+        for path in paths {
+            let keyURL = URL(fileURLWithPath: path)
+            guard keyURL.path.hasPrefix("/") else { throw LoaderPreflightError.privateKeyPathMustBeAbsolute }
+            if let repositoryRoot, keyURL.standardizedFileURL.path.hasPrefix(repositoryRoot.standardizedFileURL.path + "/") {
+                throw LoaderPreflightError.privateKeyInsideRepository
+            }
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: keyURL.path, isDirectory: &isDirectory), !isDirectory.boolValue else {
+                throw LoaderPreflightError.privateKeyNotFound(keyURL.path)
+            }
         }
     }
 }
@@ -367,7 +397,7 @@ public struct LoaderRunner: Sendable {
             case .validate: status = "validated"
             case .dryRun: status = "dry-run"
             case .effectAudit: status = "audit-ready"
-            case .seed, .sync, .syncAll, .syncPackArtwork, .syncCardIndexes: throw LoaderExecutionError.pipelineNotConfigured
+            case .seed, .sync, .syncAll, .syncPackArtwork, .syncCardIndexes, .promoteProduction: throw LoaderExecutionError.pipelineNotConfigured
             }
             return LoaderRunReport(command: command.name, status: status, exitCode: .success,
                                    startedAt: started, finishedAt: now(), range: command.range?.description,
@@ -392,6 +422,38 @@ public struct LoaderRunner: Sendable {
         do {
             try configuration.validate(for: command)
             switch command {
+            case let .promoteProduction(apply):
+                guard let root = configuration.repositoryRoot,
+                      let keyID = configuration.secrets.cloudKitKeyID,
+                      let keyPath = configuration.secrets.cloudKitPrivateKeyPath else {
+                    throw LoaderExecutionError.pipelineNotConfigured
+                }
+                let credentials = CloudKitServerCredentials(keyID: keyID, privateKeyPath: URL(fileURLWithPath: keyPath))
+                let container = LoaderPipelineConfiguration(containerIdentifier: configuration.secrets.cloudKitContainerIdentifier, checkpointURL: root.appendingPathComponent(".loader-state/production.json")).containerIdentifier
+                let signer = CloudKitRequestSigner(credentials: credentials, now: now)
+                let source = CloudKitWebService(configuration: try .init(containerIdentifier: container), transport: transport, signer: signer)
+                let destinationCredentials = CloudKitServerCredentials(
+                    keyID: configuration.secrets.productionKeyID ?? keyID,
+                    privateKeyPath: URL(fileURLWithPath: configuration.secrets.productionPrivateKeyPath ?? keyPath))
+                let destination = CloudKitWebService(configuration: try .init(containerIdentifier: container, environment: "production",
+                    productionAccess: apply ? .publish : .readOnly), transport: transport,
+                    signer: CloudKitRequestSigner(credentials: destinationCredentials, now: now))
+                // Verify Production credentials before downloading the source catalog.
+                _ = try await destination.existingHashes(for: ["catalog-manifest-v1"])
+                var artworkSetIDs = Set<String>()
+                let artworkManifestURL = root.appendingPathComponent(".generated/booster-pack-art/manifest.json")
+                if let data = try? Data(contentsOf: artworkManifestURL),
+                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let sets = object["sets"] as? [String: Any] { artworkSetIDs.formUnion(sets.keys) }
+                let promotion = CatalogProductionPromotion(additionalSetIDs: artworkSetIDs)
+                let records = try await promotion.readSource(service: source)
+                let counts = try await promotion.run(records: records, destination: destination, apply: apply)
+                let report = LoaderRunReport(command: command.name, status: apply ? "published" : "dry-run", exitCode: .success,
+                    startedAt: started, finishedAt: now(), recordCounts: counts)
+                let reportURL = root.appendingPathComponent(".loader-state/production-\(apply ? "publish" : "plan").json")
+                try FileManager.default.createDirectory(at: reportURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try Data(LoaderReportEncoder.encode(report).utf8).write(to: reportURL, options: .atomic)
+                return report
             case .syncCardIndexes:
                 guard let root = configuration.repositoryRoot,
                       let keyID = configuration.secrets.cloudKitKeyID,
@@ -399,7 +461,7 @@ public struct LoaderRunner: Sendable {
                     throw LoaderExecutionError.pipelineNotConfigured
                 }
                 let credentials = CloudKitServerCredentials(keyID: keyID, privateKeyPath: URL(fileURLWithPath: keyPath))
-                let pipelineConfiguration = LoaderPipelineConfiguration(checkpointURL: root.appendingPathComponent(".loader-state/sync-card-indexes.json"))
+                let pipelineConfiguration = LoaderPipelineConfiguration(containerIdentifier: configuration.secrets.cloudKitContainerIdentifier, checkpointURL: root.appendingPathComponent(".loader-state/sync-card-indexes.json"))
                 let pipeline = LiveCatalogPipeline(configuration: pipelineConfiguration, transport: transport,
                                                    cardAPIKey: configuration.secrets.cardSourceAPIKey, now: now)
                 let webConfiguration = try CloudKitWebServiceConfiguration(containerIdentifier: pipelineConfiguration.containerIdentifier)
@@ -418,7 +480,7 @@ public struct LoaderRunner: Sendable {
                     throw LoaderExecutionError.pipelineNotConfigured
                 }
                 let credentials = CloudKitServerCredentials(keyID: keyID, privateKeyPath: URL(fileURLWithPath: keyPath))
-                let pipelineConfiguration = LoaderPipelineConfiguration(checkpointURL: root.appendingPathComponent(".loader-state/sync-pack-artwork.json"))
+                let pipelineConfiguration = LoaderPipelineConfiguration(containerIdentifier: configuration.secrets.cloudKitContainerIdentifier, checkpointURL: root.appendingPathComponent(".loader-state/sync-pack-artwork.json"))
                 let webConfiguration = try CloudKitWebServiceConfiguration(containerIdentifier: pipelineConfiguration.containerIdentifier)
                 let service = CloudKitWebService(configuration: webConfiguration, transport: transport,
                                                  signer: CloudKitRequestSigner(credentials: credentials, now: now))
@@ -434,6 +496,7 @@ public struct LoaderRunner: Sendable {
                     throw LoaderExecutionError.pipelineNotConfigured
                 }
                 let pipelineConfiguration = LoaderPipelineConfiguration(
+                    containerIdentifier: configuration.secrets.cloudKitContainerIdentifier,
                     checkpointURL: root.appendingPathComponent(".loader-state/validate-read-only.json")
                 )
                 let credentials = CloudKitServerCredentials(keyID: keyID, privateKeyPath: URL(fileURLWithPath: keyPath))
@@ -450,7 +513,7 @@ public struct LoaderRunner: Sendable {
                                            startedAt: started, finishedAt: now())
                 }
                 guard let root = configuration.repositoryRoot else { throw LoaderExecutionError.pipelineNotConfigured }
-                let pipelineConfiguration = LoaderPipelineConfiguration(checkpointURL: root.appendingPathComponent(".loader-state/dry-run-\(range.description).json"))
+                let pipelineConfiguration = LoaderPipelineConfiguration(containerIdentifier: configuration.secrets.cloudKitContainerIdentifier, checkpointURL: root.appendingPathComponent(".loader-state/dry-run-\(range.description).json"))
                 let batch = try await LiveCatalogPipeline(configuration: pipelineConfiguration, transport: transport,
                                                           cardAPIKey: configuration.secrets.cardSourceAPIKey, now: now).build(range: range)
                 return LoaderRunReport(command: command.name, status: "dry-run", exitCode: .success,
@@ -471,7 +534,7 @@ public struct LoaderRunner: Sendable {
                     throw LoaderExecutionError.pipelineNotConfigured
                 }
                 let checkpointURL = root.appendingPathComponent(".loader-state/sync-all.json")
-                let pipelineConfiguration = LoaderPipelineConfiguration(checkpointURL: checkpointURL)
+                let pipelineConfiguration = LoaderPipelineConfiguration(containerIdentifier: configuration.secrets.cloudKitContainerIdentifier, checkpointURL: checkpointURL)
                 let pipeline = LiveCatalogPipeline(configuration: pipelineConfiguration, transport: transport,
                                                    cardAPIKey: configuration.secrets.cardSourceAPIKey, now: now)
                 let credentials = CloudKitServerCredentials(keyID: keyID, privateKeyPath: URL(fileURLWithPath: keyPath))
@@ -494,7 +557,7 @@ public struct LoaderRunner: Sendable {
                     throw LoaderExecutionError.pipelineNotConfigured
                 }
                 let checkpointURL = root.appendingPathComponent(".loader-state/\(command.name)-\(range.description).json")
-                let pipelineConfiguration = LoaderPipelineConfiguration(checkpointURL: checkpointURL)
+                let pipelineConfiguration = LoaderPipelineConfiguration(containerIdentifier: configuration.secrets.cloudKitContainerIdentifier, checkpointURL: checkpointURL)
                 let pipeline = LiveCatalogPipeline(configuration: pipelineConfiguration, transport: transport,
                                                    cardAPIKey: configuration.secrets.cardSourceAPIKey, now: now)
                 let batch = try await pipeline.build(range: range)
@@ -580,7 +643,7 @@ public enum LoaderReportEncoder {
 
 public enum SecretRedactor {
     public static func redact(_ message: String, secrets: LoaderSecrets) -> String {
-        [secrets.cardSourceAPIKey, secrets.cloudKitKeyID, secrets.cloudKitPrivateKeyPath]
+        [secrets.cardSourceAPIKey, secrets.cloudKitKeyID, secrets.cloudKitPrivateKeyPath, secrets.productionKeyID, secrets.productionPrivateKeyPath, secrets.cloudKitContainerIdentifier]
             .compactMap { $0 }
             .filter { !$0.isEmpty }
             .reduce(message) { $0.replacingOccurrences(of: $1, with: "[REDACTED]") }

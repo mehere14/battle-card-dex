@@ -6,8 +6,9 @@ import UIKit
 @MainActor
 struct ContentView: View {
     @ObservedObject var model: CatalogViewModel
+    @ObservedObject var library: LibraryRepository
 
-    init(model: CatalogViewModel) { self.model = model }
+    init(model: CatalogViewModel, library: LibraryRepository) { self.model = model; self.library = library }
 
     var body: some View {
 #if DEBUG
@@ -15,10 +16,10 @@ struct ContentView: View {
            [DevelopmentCloudKitProbe.readMode, DevelopmentCloudKitProbe.mutationDenialMode].contains(mode) {
             DevelopmentCloudKitProbeView(mode: mode)
         } else {
-            CatalogHomeView(model: model)
+            CatalogHomeView(model: model, library: library)
         }
 #else
-        CatalogHomeView(model: model)
+        CatalogHomeView(model: model, library: library)
 #endif
     }
 }
@@ -27,10 +28,13 @@ private struct CatalogHomeView: View {
     private enum HomeTab: String, CaseIterable, Identifiable {
         case pokemon = "Pokémon"
         case packs = "Packs"
+        case library = "Your Library"
         var id: Self { self }
     }
 
     @ObservedObject var model: CatalogViewModel
+    @ObservedObject var library: LibraryRepository
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("appearance") private var appearance = "dark"
     @State private var query = ""
     @State private var generation: String?
@@ -43,8 +47,10 @@ private struct CatalogHomeView: View {
     @State private var sparkleRotation = 0.0
     @State private var homeTab: HomeTab = .pokemon
     @State private var selectedPack: BoosterPackArtwork?
+    @State private var showLibraryScanner = false
 #if DEBUG
     @State private var showCardEffectsLab = false
+    @State private var showCardScanner = false
 #endif
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AccessibilityFocusState private var focusedCreatureID: Int?
@@ -70,17 +76,29 @@ private struct CatalogHomeView: View {
             }
             .preferredColorScheme(colorScheme)
             .task { await model.load() }
+            .task {
+#if DEBUG
+                if ProcessInfo.processInfo.environment["BATTLE_CARD_DEX_OPEN_LIBRARY"] == "1" { homeTab = .library }
+#endif
+                await library.start()
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { Task { await library.start() } }
+            }
             .sheet(isPresented: $showFilters) {
                 FilterPanel(query: $query, generation: $generation, type: $type, availableGenerations: model.creatures.compactMap(\.generation), availableTypes: model.creatures.flatMap(\.types))
                     .presentationDetents([.medium, .large])
             }
 #if DEBUG
+            .fullScreenCover(isPresented: $showCardScanner) {
+                DebugCardScannerView(imageRepository: model.imageRepository)
+            }
             .fullScreenCover(isPresented: $showCardEffectsLab) {
                 CardEffectsLab(imageRepository: model.imageRepository)
             }
 #endif
             .fullScreenCover(item: $selectedPack) { pack in
-                DebugPackOpeningView(pack: pack, model: model)
+                DebugPackOpeningView(pack: pack, model: model, library: library)
             }
             .fullScreenCover(item: $selected, onDismiss: {
                 guard let lastSelectedCreatureID else { return }
@@ -117,8 +135,10 @@ private struct CatalogHomeView: View {
                     if homeTab == .pokemon {
                         regionFilter
                         creatureContent(width: geometry.size.width)
-                    } else {
+                    } else if homeTab == .packs {
                         packContent(width: geometry.size.width)
+                    } else {
+                        YourLibraryView(library: library, imageRepository: model.imageRepository, width: geometry.size.width) { homeTab = .packs }
                     }
                 }
                 .padding(.horizontal, geometry.size.width >= 700 ? design.spacing.largeLayoutMargin : design.spacing.phoneMargin)
@@ -127,7 +147,13 @@ private struct CatalogHomeView: View {
             }
             .scrollIndicators(.hidden)
             .scrollPosition(id: $launcherScrollPosition)
-            .refreshable { await model.retry() }
+            .refreshable {
+                if homeTab == .library { await library.retrySync() }
+                else { await model.retry() }
+            }
+        }
+        .fullScreenCover(isPresented: $showLibraryScanner) {
+            CardScannerView(library: library, imageRepository: model.imageRepository)
         }
     }
 
@@ -172,7 +198,7 @@ private struct CatalogHomeView: View {
                 Button {
                     withAnimation(.easeInOut(duration: reduceMotion ? 0.01 : 0.22)) { homeTab = tab }
                 } label: {
-                    Text(tab.rawValue.uppercased())
+                    Text(tab.rawValue.uppercased()).lineLimit(1).minimumScaleFactor(0.7)
                         .font(.system(size: 13, weight: .bold, design: .rounded)).tracking(1.2)
                         .frame(maxWidth: .infinity).frame(height: 42)
                         .foregroundStyle(homeTab == tab ? .black : Color(design.palette.text))
@@ -180,7 +206,7 @@ private struct CatalogHomeView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(homeTab == tab ? .isSelected : [])
-                .accessibilityIdentifier("home-tab-\(tab == .pokemon ? "pokemon" : "packs")")
+                .accessibilityIdentifier("home-tab-\(tab == .pokemon ? "pokemon" : tab == .packs ? "packs" : "library")")
             }
         }
         .padding(4)
@@ -219,11 +245,23 @@ private struct CatalogHomeView: View {
         VStack(alignment: .leading, spacing: design.spacing.small) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("BATTLE CARD DEX").font(.system(size: 12, weight: .bold, design: .rounded)).tracking(2).foregroundStyle(Color(design.palette.secondary))
-                Text("Choose Your Battler").font(.largeTitle.bold()).foregroundStyle(Color(design.palette.text))
-                Text("A focused field guide for the shared catalog.").font(.subheadline).foregroundStyle(Color(design.palette.mutedText))
+                if homeTab == .library {
+                    LibraryHeader { showLibraryScanner = true }
+                } else {
+                    Text(homeTab == .pokemon ? "Choose Your Battler" : "Virtual Packs").font(.largeTitle.bold()).foregroundStyle(Color(design.palette.text))
+                    Text(homeTab == .pokemon ? "A focused field guide for the shared catalog." : "Open a pack. Keep every pull.").font(.subheadline).foregroundStyle(Color(design.palette.mutedText))
+                }
             }
-            HStack(spacing: 8) {
 #if DEBUG
+            HStack(spacing: 8) {
+                Button { showCardScanner = true } label: {
+                    Label("Scan Card", systemImage: "viewfinder")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 12).frame(height: 42)
+                        .background(.ultraThinMaterial, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("card-scanner-cta")
                 Button { showCardEffectsLab = true } label: {
                     Label("Card Effects Lab", systemImage: "sparkles.rectangle.stack")
                         .font(.caption.weight(.semibold))
@@ -232,13 +270,17 @@ private struct CatalogHomeView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("card-effects-lab-cta")
+            }
 #endif
+            HStack(spacing: 8) {
+                if homeTab == .pokemon {
                 IconButton(systemName: "magnifyingglass", label: "Search and filter") { showFilters = true }
                 IconButton(systemName: "sparkles", label: "Surprise me", rotation: sparkleRotation) {
                     withAnimation(.easeInOut(duration: reduceMotion ? MotionConstants.standard.reducedMotionDuration : MotionConstants.standard.shuffleDuration)) {
                         shuffleSeed = Int.random(in: 1...Int.max)
                         sparkleRotation += 180
                     }
+                }
                 }
                 Menu {
                     Picker("Appearance", selection: $appearance) {
@@ -1458,7 +1500,7 @@ private struct DetailFailureView: View {
     }
 }
 
-private struct InteractiveCardViewer: View {
+struct InteractiveCardViewer: View {
     let card: BattleCardDetail
     let imageRepository: (any ImageRepository)?
     let onClose: () -> Void
@@ -1484,7 +1526,9 @@ private struct InteractiveCardViewer: View {
 
                 VStack(spacing: 16) {
                     cardSurface
-                        .frame(width: min(geometry.size.width * 0.40, 410))
+                        .frame(width: geometry.size.height > geometry.size.width
+                               ? min(geometry.size.width * 0.82, max(1, geometry.size.height - 100) * 734 / 1024)
+                               : min(geometry.size.width * 0.40, 410))
                     Text("MOVE TO CATCH THE LIGHT")
                         .font(.system(size: 10, weight: .bold, design: .rounded))
                         .tracking(1.5)
@@ -1608,7 +1652,7 @@ private struct InteractiveCardViewer: View {
     }
 }
 
-private extension Color {
+extension Color {
     init(_ color: DesignColor) {
 #if canImport(UIKit)
         self.init(uiColor: UIColor { traits in

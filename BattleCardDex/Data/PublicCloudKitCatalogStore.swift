@@ -6,7 +6,7 @@ import OSLog
 /// operation is exposed to application features.
 actor PublicCloudKitCatalogStore: PublicCatalogStore, PublicCatalogQueryStore {
     private nonisolated static let logger = Logger(
-        subsystem: "com.askcruit.Battle-Card-Dex",
+        subsystem: "com.example.BattleCardDex",
         category: "PublicCloudKitCatalogStore"
     )
     private let database: CKDatabase

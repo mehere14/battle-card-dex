@@ -10,7 +10,7 @@ public struct LoaderPipelineConfiguration: Sendable {
     public init(
         creatureBaseURL: URL = URL(string: "https://pokeapi.co/api/v2/")!,
         cardBaseURL: URL = URL(string: "https://api.pokemontcg.io/v2/")!,
-        containerIdentifier: String = "iCloud.com.askcruit.Battle-Card-Dex",
+        containerIdentifier: String = "iCloud.com.example.BattleCardDex",
         checkpointURL: URL
     ) {
         self.creatureBaseURL = creatureBaseURL

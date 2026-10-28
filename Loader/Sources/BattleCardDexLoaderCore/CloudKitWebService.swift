@@ -1,21 +1,28 @@
 import CryptoKit
 import Foundation
 
+public enum ProductionCatalogAccess: Sendable {
+    case readOnly, publish
+}
+
 public struct CloudKitWebServiceConfiguration: Equatable, Sendable {
     public let containerIdentifier: String
     public let environment: String
     public let database: String
+    public let allowsWrites: Bool
     public let baseURL: URL
 
     public init(containerIdentifier: String, environment: String = "development", database: String = "public",
-                baseURL: URL = URL(string: "https://api.apple-cloudkit.com")!) throws {
-        guard containerIdentifier.hasPrefix("iCloud."), environment == "development", database == "public" else {
+                baseURL: URL = URL(string: "https://api.apple-cloudkit.com")!,
+                productionAccess: ProductionCatalogAccess? = nil) throws {
+        guard containerIdentifier.hasPrefix("iCloud."), (environment == "development" || (environment == "production" && productionAccess != nil)), database == "public" else {
             throw CloudKitWebServiceError.unsafeConfiguration
         }
         self.containerIdentifier = containerIdentifier
         self.environment = environment
         self.database = database
         self.baseURL = baseURL
+        self.allowsWrites = environment == "development" || productionAccess == .publish
     }
 
     func URLFor(_ operation: String) -> URL {
@@ -41,6 +48,7 @@ public enum CloudKitQueriedField: Equatable, Sendable {
     case data(Data)
     case strings([String])
     case integers([Int64])
+    case date(Date)
     case unknown
 }
 
@@ -71,6 +79,13 @@ public struct CloudKitQueryResult: Equatable, Sendable {
 
 public protocol LoaderCloudKitQuerying: Sendable {
     func queryRecords(recordType: String, desiredKeys: [String]) async throws -> CloudKitQueryResult
+    func lookupRecords(identifiers: [String], desiredKeys: [String]) async throws -> CloudKitQueryResult
+}
+
+extension LoaderCloudKitQuerying {
+    public func lookupRecords(identifiers: [String], desiredKeys: [String]) async throws -> CloudKitQueryResult {
+        throw CloudKitWebServiceError.unsafeConfiguration
+    }
 }
 
 public protocol CloudKitRequestSigning: Sendable {
@@ -148,6 +163,10 @@ public actor CloudKitWebService: LoaderCloudKitService, LoaderCloudKitQuerying {
     }
 
     public func save(_ records: [LoaderRecord]) async throws {
+        guard configuration.allowsWrites else { throw CloudKitWebServiceError.unsafeConfiguration }
+        guard records.allSatisfy({ record in
+            Self.catalogTypes.contains(record.recordType) && record.identifier.hasPrefix("catalog-")
+        }) else { throw CloudKitWebServiceError.unsafeConfiguration }
         guard !records.isEmpty else { return }
         let operations: [[String: Any]] = try records.map { record in
             guard !record.recordType.isEmpty else { throw CloudKitPublisherError.emptyRecordIdentifier }
@@ -171,11 +190,10 @@ public actor CloudKitWebService: LoaderCloudKitService, LoaderCloudKitQuerying {
     }
 
     /// Reads every page for one Development/public record type. This method has
-    /// no mutation path; `CloudKitWebServiceConfiguration` rejects production
-    /// and non-public database construction before any request can be made.
+    /// no mutation path. Production access requires an explicit capability;
+    /// non-public databases are always rejected.
     public func queryRecords(recordType: String, desiredKeys: [String]) async throws -> CloudKitQueryResult {
-        let allowedTypes: Set<String> = ["CatalogManifest", "CreatureCatalogRecord", "EvolutionCatalogRecord", "CardCatalogRecord", "CardSetIndexRecord", "PackArtworkRecord"]
-        guard allowedTypes.contains(recordType) else { throw CloudKitWebServiceError.unsafeConfiguration }
+        guard Self.catalogTypes.contains(recordType) else { throw CloudKitWebServiceError.unsafeConfiguration }
 
         var continuationMarker: String?
         var seenMarkers = Set<String>()
@@ -200,6 +218,31 @@ public actor CloudKitWebService: LoaderCloudKitService, LoaderCloudKitQuerying {
         } while continuationMarker != nil
         return CloudKitQueryResult(records: records, responseBytes: responseBytes)
     }
+
+    public func lookupRecords(identifiers: [String], desiredKeys: [String]) async throws -> CloudKitQueryResult {
+        let names = Array(Set(identifiers)).sorted()
+        var records: [CloudKitQueriedRecord] = []
+        var responseBytes = 0
+        for start in stride(from: 0, to: names.count, by: 100) {
+            let body = try JSONSerialization.data(withJSONObject: [
+                "records": names[start..<min(start + 100, names.count)].map { ["recordName": $0] },
+                "desiredKeys": desiredKeys.sorted(),
+            ], options: [.sortedKeys])
+            let response = try await send(operation: "records/lookup", body: body)
+            responseBytes += response.body.count
+            for record in try responseRecords(response.body) {
+                if let code = record["serverErrorCode"] as? String {
+                    if code == "NOT_FOUND" { continue }
+                    throw CloudKitWebServiceError.server(code: code, recordName: record["recordName"] as? String,
+                        reason: record["reason"] as? String)
+                }
+                records.append(try Self.queriedRecord(record))
+            }
+        }
+        return .init(records: records, responseBytes: responseBytes)
+    }
+
+    private static let catalogTypes: Set<String> = ["CatalogManifest", "CreatureCatalogRecord", "EvolutionCatalogRecord", "CardCatalogRecord", "CardSetIndexRecord", "PackArtworkRecord"]
 
     private func send(operation: String, body: Data) async throws -> LoaderHTTPResponse {
         let url = configuration.URLFor(operation)
@@ -255,6 +298,9 @@ public actor CloudKitWebService: LoaderCloudKitService, LoaderCloudKitQuerying {
         case "BYTES":
             guard let encoded = value as? String, let data = Data(base64Encoded: encoded) else { return .unknown }
             return .data(data)
+        case "TIMESTAMP":
+            guard let value = value as? NSNumber else { return .unknown }
+            return .date(Date(timeIntervalSince1970: value.doubleValue / 1_000))
         case "INT64":
             guard let value = value as? NSNumber else { return .unknown }
             return .integer(value.int64Value)

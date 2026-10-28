@@ -1,3 +1,4 @@
+import { setupLibrary } from "./library.js";
 const ASSET_ROOT = "./Mockup Assets/";
 
 const pokemon = [
@@ -255,6 +256,8 @@ function createDevice(device) {
 
   function openCard(trigger, card) {
     lastCardTrigger = trigger;
+    launcher.inert = true;
+    home.inert = true;
     modalImage.src = `${ASSET_ROOT}${card.image}`;
     modalImage.alt = card.name;
     modal.setAttribute("aria-hidden", "false");
@@ -264,6 +267,8 @@ function createDevice(device) {
   function closeCard() {
     if (modal.getAttribute("aria-hidden") === "true") return;
     modal.setAttribute("aria-hidden", "true");
+    launcher.inert = false;
+    home.inert = false;
     modalCard.style.setProperty("--rx", "0deg");
     modalCard.style.setProperty("--ry", "0deg");
     lastCardTrigger?.focus({ preventScroll: true });
@@ -465,6 +470,11 @@ function createDevice(device) {
   });
 
   shell.addEventListener("keydown", (event) => {
+    if (event.key === "Tab" && modal.getAttribute("aria-hidden") === "false") {
+      const buttons = [...modal.querySelectorAll("button")];
+      if (event.shiftKey && document.activeElement === buttons[0]) { event.preventDefault(); buttons.at(-1).focus(); }
+      else if (!event.shiftKey && document.activeElement === buttons.at(-1)) { event.preventDefault(); buttons[0].focus(); }
+    }
     if (event.key !== "Escape") return;
     if (modal.getAttribute("aria-hidden") === "false") closeCard();
     else if (panel !== "home") closePanel();
@@ -472,6 +482,7 @@ function createDevice(device) {
 
   setIndex(0);
   setView("launcher");
+  setupLibrary(shell, cards, openCard);
 }
 
 document.querySelectorAll(".device").forEach(createDevice);

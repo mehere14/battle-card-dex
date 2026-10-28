@@ -2,7 +2,7 @@
 //  Item.swift
 //  Pokemon Pros
 //
-//  Created by Mihir Panchal on 2026-08-31.
+//  Created on 2026-08-31.
 //
 
 import Foundation

@@ -2,7 +2,7 @@
 //  Pokemon_ProsUITests.swift
 //  Pokemon ProsUITests
 //
-//  Created by Mihir Panchal on 2026-08-31.
+//  Created on 2026-08-31.
 //
 
 import XCTest

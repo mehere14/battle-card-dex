@@ -1,5 +1,9 @@
 # Build, Configuration, and Compliance Specification
 
+## Current status: optional build checks
+
+The terminology build checks are temporarily disabled at the user’s request. Both app configurations set `ENABLE_TERMINOLOGY_COMPLIANCE = NO`. Both build phases, the scanner script, and its tests remain intact. To reinstate Release enforcement, set the app target’s user-defined build setting `ENABLE_TERMINOLOGY_COMPLIANCE` to `YES` for Release in Xcode. For a single command-line build, pass `ENABLE_TERMINOLOGY_COMPLIANCE=YES` to `xcodebuild`. The checks still only execute in Release. Standalone script invocations continue to enforce the rule regardless of this build setting. Historical results below describe the earlier enforced setup.
+
 ## Baseline
 
 Baseline captured on September 4, 2026 before implementation changes.
@@ -10,7 +14,7 @@ Baseline captured on September 4, 2026 before implementation changes.
 - Project: `Pokemon Pros.xcodeproj`; Debug and Release configurations.
 - Scheme: `Pokemon Pros`.
 - Targets: app, unit tests, and UI tests under the original `Pokemon Pros` names.
-- App bundle ID: `com.askcruit.Pokemon-Pros`; automatic signing; development team `PMF38PJVT3`.
+- App bundle ID: `com.example.ArchiveApp`; automatic signing; development team `YOUR_TEAM_ID`.
 - Deployment: iOS 26.5; iPhone and iPad device families. The starter project also advertises macOS and visionOS and must be narrowed during the rename task.
 - Entitlements: development push notifications and CloudKit service are enabled, but the CloudKit container identifier list is empty.
 - Build warning: App Intents metadata extraction is skipped because the starter app has no App Intents dependency.
@@ -47,8 +51,8 @@ python3 -m unittest discover -s Scripts -p "test_*.py" -v
 - Targets and products: `Battle Card Dex.app`, `BattleCardDexTests.xctest`, and `BattleCardDexUITests.xctest`.
 - Swift entry point: `BattleCardDexApp` in `BattleCardDex/BattleCardDexApp.swift`.
 - Display name, bundle name, executable, and process product name: `Battle Card Dex`.
-- Bundle identifiers: `com.askcruit.Battle-Card-Dex`, `com.askcruit.Battle-Card-DexTests`, and `com.askcruit.Battle-Card-DexUITests`.
-- CloudKit container: `iCloud.com.askcruit.Battle-Card-Dex`.
+- Bundle identifiers: `com.example.BattleCardDex`, `com.example.BattleCardDexTests`, and `com.example.BattleCardDexUITests`.
+- CloudKit container: `iCloud.com.example.BattleCardDex`.
 - Supported platforms: iOS device and iOS Simulator; iPhone and iPad device families.
 
 ## Baseline results
@@ -62,8 +66,8 @@ python3 -m unittest discover -s Scripts -p "test_*.py" -v
 
 - Renamed shared-scheme clean simulator build: passed.
 - Renamed unit suite: passed (`BattleCardDexTests/example()`).
-- Renamed UI suite: passed six tests with zero failures. Its launch logs identify the tested application as `com.askcruit.Battle-Card-Dex`.
-- Built metadata: `CFBundleDisplayName`, `CFBundleName`, and `CFBundleExecutable` are `Battle Card Dex`; `CFBundleIdentifier` is `com.askcruit.Battle-Card-Dex`.
+- Renamed UI suite: passed six tests with zero failures. Its launch logs identify the tested application as `com.example.BattleCardDex`.
+- Built metadata: `CFBundleDisplayName`, `CFBundleName`, and `CFBundleExecutable` are `Battle Card Dex`; `CFBundleIdentifier` is `com.example.BattleCardDex`.
 - Shipping Swift, plist, entitlement, asset metadata, project metadata, and scheme scans contain neither prohibited spelling.
 - `strings` scans of the main Mach-O executable and every file in the complete `.app` bundle contain neither prohibited spelling.
 - Unsigned Release iOS archive: passed. The built app and archive contain no `Plan/`, `Design Mockup/`, or `Reference/` directory or file.

@@ -37,7 +37,7 @@ nonisolated struct CatalogCoordinatorSnapshot: Equatable, Sendable {
 /// public batches are retained in both memory and the local mirror.
 actor CatalogCoordinator {
     private nonisolated static let logger = Logger(
-        subsystem: "com.askcruit.Battle-Card-Dex",
+        subsystem: "com.example.BattleCardDex",
         category: "CatalogCoordinator"
     )
     private let local: any LocalCatalogStore

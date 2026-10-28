@@ -23,10 +23,14 @@ struct DebugPackOpeningView: View {
 
     private let interaction = PackOpeningInteractionModel()
     private let packRatio: CGFloat = 400.0 / 731.0
+    @State private var openingID = UUID()
+    @State private var librarySaveError: String?
+    @State private var showLibrarySaveError = false
+    @ObservedObject var library: LibraryRepository
     let pack: BoosterPackArtwork
     @ObservedObject var model: CatalogViewModel
 
-    init(pack: BoosterPackArtwork, model: CatalogViewModel) { self.pack = pack; self.model = model }
+    init(pack: BoosterPackArtwork, model: CatalogViewModel, library: LibraryRepository) { self.pack = pack; self.model = model; self.library = library }
 
     var body: some View {
         GeometryReader { proxy in
@@ -51,6 +55,10 @@ struct DebugPackOpeningView: View {
         .onAppear(perform: animateEntrance)
         .task { await loadPackCards() }
         .task { await loadPackArtwork() }
+        .alert("Couldn’t save this pack", isPresented: $showLibrarySaveError) {
+            Button("Try Again") { openPack() }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text(librarySaveError ?? "Please try again.") }
     }
 
     private var header: some View {
@@ -64,7 +72,7 @@ struct DebugPackOpeningView: View {
                 Image(systemName: "xmark").font(.headline)
                     .frame(width: 44, height: 44).background(.ultraThinMaterial, in: Circle())
             }
-            .accessibilityLabel("Close pack prototype")
+            .accessibilityLabel("Close pack")
         }
     }
 
@@ -278,6 +286,12 @@ struct DebugPackOpeningView: View {
 
     private func openPack() {
         guard entranceComplete, cards.count == 10, !cardsVisible else { return }
+        do {
+            try library.addOpenedPack(openingID: openingID, packID: pack.setID, cards: cards.map(\.card))
+        } catch {
+            librarySaveError = error.localizedDescription; showLibrarySaveError = true; cutProgress = 0; phase = .sealed
+            return
+        }
         phase = .opening
         cutProgress = 1
         UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.95)

@@ -6,7 +6,7 @@ import SwiftUI
 @MainActor
 final class CatalogViewModel: ObservableObject {
     private nonisolated static let logger = Logger(
-        subsystem: "com.askcruit.Battle-Card-Dex",
+        subsystem: "com.example.BattleCardDex",
         category: "CatalogViewModel"
     )
     enum State: Equatable {

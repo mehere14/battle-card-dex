@@ -192,6 +192,16 @@ func localEnvFallback() throws {
     #expect(secrets.cloudKitPrivateKeyPath == "/private/tmp/key.p8")
 }
 
+@Test("container overrides are resolved privately and redacted")
+func resolvesAndRedactsContainerIdentifier() throws {
+    let container = "iCloud.com.example.Override"
+    let resolved = try LoaderSecretResolver(environment: [
+        LoaderSecretKey.cloudKitContainerIdentifier.rawValue: container,
+    ]).resolve()
+    #expect(resolved.cloudKitContainerIdentifier == container)
+    #expect(SecretRedactor.redact("container=\(container)", secrets: resolved) == "container=[REDACTED]")
+}
+
 @Test("logs redact all injected secret values")
 func redactsSecrets() {
     let secrets = LoaderSecrets(cardSourceAPIKey: "card-secret", cloudKitKeyID: "cloud-secret", cloudKitPrivateKeyPath: "/private/tmp/private-secret.p8")

@@ -115,6 +115,14 @@ struct AppConfiguration: Equatable, Sendable {
         self.localPersistenceMode = localPersistenceMode
     }
 
+    static var configuredCloudKitContainerIdentifier: String {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: "CatalogCloudKitContainerIdentifier") as? String,
+              value.hasPrefix("iCloud."), !value.contains("$(") else {
+            return "iCloud.com.example.BattleCardDex"
+        }
+        return value
+    }
+
     static func configuration(for environment: AppEnvironment) throws -> AppConfiguration {
         let service: CloudCatalogService
         let persistence: LocalPersistenceMode
@@ -150,7 +158,7 @@ struct AppConfiguration: Equatable, Sendable {
         return try AppConfiguration(
             environment: environment,
             cloudCatalog: CloudCatalogConfiguration(
-                containerIdentifier: "iCloud.com.askcruit.Battle-Card-Dex",
+                containerIdentifier: configuredCloudKitContainerIdentifier,
                 manifestRecordType: "CatalogManifest",
                 creatureRecordType: "CreatureCatalogRecord",
                 evolutionRecordType: "EvolutionCatalogRecord",

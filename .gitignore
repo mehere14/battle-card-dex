@@ -22,3 +22,17 @@ Loader/.build/
 .DS_Store
 __pycache__/
 .codex-write-test
+
+# Private scanner launch environment (App Check debug token).
+**/xcuserdata/**/xcschemes/Card Scanner Local.xcscheme
+
+# Private Firebase configuration, signing identifiers, and Xcode user state.
+**/GoogleService-Info.plist
+**/GoogleService-Info-*.plist
+Configuration/Local.xcconfig
+**/xcuserdata/
+*.xcuserstate
+
+# Local browser build output.
+**/node_modules/
+**/dist/

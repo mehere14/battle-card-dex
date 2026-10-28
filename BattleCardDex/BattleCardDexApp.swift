@@ -2,7 +2,7 @@
 //  BattleCardDexApp.swift
 //  Battle Card Dex
 //
-//  Created by Mihir Panchal on 2026-08-31.
+//  Created on 2026-08-31.
 //
 
 import SwiftUI
@@ -13,15 +13,19 @@ import SwiftData
 struct BattleCardDexApp: App {
     let sharedModelContainer: ModelContainer
     @StateObject private var catalogModel: CatalogViewModel
+    @StateObject private var library: LibraryRepository
 
     init() {
         let appConfiguration = AppConfiguration.current
+        let useFixtures = ProcessInfo.processInfo.environment["BATTLE_CARD_DEX_USE_PREVIEW"] == "1"
+            || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        _library = StateObject(wrappedValue: LibraryRepository(configuration: appConfiguration, inMemory: useFixtures))
         do {
             let container = try LocalCatalogContainer.make(
                 isStoredInMemoryOnly: appConfiguration.localPersistenceMode == .inMemory
             )
             sharedModelContainer = container
-            if ProcessInfo.processInfo.environment["BATTLE_CARD_DEX_USE_PREVIEW"] == "1" {
+            if useFixtures {
                 _catalogModel = StateObject(wrappedValue: CatalogViewModel.preview())
                 return
             }
@@ -42,7 +46,7 @@ struct BattleCardDexApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(model: catalogModel)
+            ContentView(model: catalogModel, library: library)
         }
         .modelContainer(sharedModelContainer)
     }

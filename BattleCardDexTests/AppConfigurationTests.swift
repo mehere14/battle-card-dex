@@ -155,7 +155,7 @@ struct AppConfigurationTests {
     }
 
     private func expectSharedValues(_ configuration: AppConfiguration) {
-        #expect(configuration.cloudCatalog.containerIdentifier == "iCloud.com.askcruit.Battle-Card-Dex")
+        #expect(configuration.cloudCatalog.containerIdentifier == AppConfiguration.configuredCloudKitContainerIdentifier)
         #expect(configuration.cloudCatalog.manifestRecordType == "CatalogManifest")
         #expect(configuration.cloudCatalog.creatureRecordType == "CreatureCatalogRecord")
         #expect(configuration.cloudCatalog.evolutionRecordType == "EvolutionCatalogRecord")

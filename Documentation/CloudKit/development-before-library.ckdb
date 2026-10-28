@@ -1,0 +1,137 @@
+DEFINE SCHEMA
+
+    RECORD TYPE CardCatalogRecord (
+        "___createTime"            TIMESTAMP,
+        "___createdBy"             REFERENCE,
+        "___etag"                  STRING,
+        "___modTime"               TIMESTAMP,
+        "___modifiedBy"            REFERENCE,
+        "___recordID"              REFERENCE QUERYABLE,
+        collectorNumber            STRING QUERYABLE SORTABLE,
+        contentHash                STRING QUERYABLE,
+        displayName                STRING,
+        loaderTimestamp            TIMESTAMP SORTABLE,
+        normalizedName             STRING QUERYABLE SORTABLE,
+        payload                    BYTES,
+        relatedCreatureIdentifiers LIST<INT64> QUERYABLE,
+        schemaVersion              INT64 QUERYABLE,
+        setIdentifier              STRING QUERYABLE,
+        sourceIdentifier           STRING QUERYABLE,
+        sourceTimestamp            TIMESTAMP,
+        types                      LIST<STRING> QUERYABLE,
+        GRANT CREATE, WRITE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE CardSetIndexRecord (
+        "___createTime"  TIMESTAMP,
+        "___createdBy"   REFERENCE,
+        "___etag"        STRING,
+        "___modTime"     TIMESTAMP,
+        "___modifiedBy"  REFERENCE,
+        "___recordID"    REFERENCE,
+        contentHash      STRING,
+        displayName      STRING,
+        loaderTimestamp  TIMESTAMP,
+        payload          BYTES,
+        revision         INT64,
+        schemaVersion    INT64,
+        setIdentifier    STRING,
+        sourceIdentifier STRING,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE CatalogManifest (
+        "___createTime"  TIMESTAMP,
+        "___createdBy"   REFERENCE,
+        "___etag"        STRING,
+        "___modTime"     TIMESTAMP,
+        "___modifiedBy"  REFERENCE,
+        "___recordID"    REFERENCE,
+        cardCount        INT64,
+        contentHash      STRING QUERYABLE,
+        creatureCount    INT64,
+        evolutionCount   INT64,
+        loaderTimestamp  TIMESTAMP,
+        payload          BYTES,
+        publishedAt      TIMESTAMP QUERYABLE SORTABLE,
+        revision         INT64 QUERYABLE SORTABLE,
+        schemaVersion    INT64 QUERYABLE SORTABLE,
+        sourceIdentifier STRING QUERYABLE,
+        sourceTimestamp  TIMESTAMP,
+        GRANT CREATE, WRITE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE CreatureCatalogRecord (
+        "___createTime"  TIMESTAMP,
+        "___createdBy"   REFERENCE,
+        "___etag"        STRING,
+        "___modTime"     TIMESTAMP,
+        "___modifiedBy"  REFERENCE,
+        "___recordID"    REFERENCE,
+        contentHash      STRING QUERYABLE,
+        displayName      STRING,
+        generation       STRING QUERYABLE,
+        loaderTimestamp  TIMESTAMP SORTABLE,
+        normalizedName   STRING QUERYABLE SORTABLE,
+        payload          BYTES,
+        schemaVersion    INT64 QUERYABLE,
+        sourceIdentifier INT64 QUERYABLE,
+        sourceTimestamp  TIMESTAMP,
+        types            LIST<STRING> QUERYABLE,
+        GRANT CREATE, WRITE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE EvolutionCatalogRecord (
+        "___createTime"   TIMESTAMP,
+        "___createdBy"    REFERENCE,
+        "___etag"         STRING,
+        "___modTime"      TIMESTAMP,
+        "___modifiedBy"   REFERENCE,
+        "___recordID"     REFERENCE,
+        contentHash       STRING QUERYABLE,
+        loaderTimestamp   TIMESTAMP SORTABLE,
+        memberIdentifiers LIST<INT64> QUERYABLE,
+        payload           BYTES,
+        schemaVersion     INT64 QUERYABLE,
+        sourceIdentifier  INT64 QUERYABLE,
+        sourceTimestamp   TIMESTAMP,
+        GRANT CREATE, WRITE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE PackArtworkRecord (
+        "___createTime"  TIMESTAMP,
+        "___createdBy"   REFERENCE,
+        "___etag"        STRING,
+        "___modTime"     TIMESTAMP,
+        "___modifiedBy"  REFERENCE,
+        "___recordID"    REFERENCE,
+        contentHash      STRING,
+        displayName      STRING,
+        payload          BYTES,
+        releaseYear      INT64,
+        schemaVersion    INT64,
+        setIdentifier    STRING,
+        sourceIdentifier STRING,
+        thumbnail        BYTES,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE Users (
+        "___createTime" TIMESTAMP,
+        "___createdBy"  REFERENCE,
+        "___etag"       STRING,
+        "___modTime"    TIMESTAMP,
+        "___modifiedBy" REFERENCE,
+        "___recordID"   REFERENCE,
+        roles           LIST<INT64>,
+        GRANT WRITE TO "_creator",
+        GRANT READ TO "_world"
+    );

@@ -40,7 +40,7 @@ CloudKit uses `Write` for both record changes and deletes. The operational probe
 
 ## Development container and signing
 
-The intended Development container is `iCloud.com.askcruit.Battle-Card-Dex` and must contain exactly the four catalog record types above. The project is configured for Apple Developer App ID `com.askcruit.Battle-Card-Dex`, CloudKit, Push Notifications, and development team `PMF38PJVT3`; live container association and provisioning must be confirmed during the signed-device probe.
+The intended Development container is `iCloud.com.example.BattleCardDex` and must contain exactly the four catalog record types above. The project is configured for Apple Developer App ID `com.example.BattleCardDex`, CloudKit, Push Notifications, and development team `YOUR_TEAM_ID`; live container association and provisioning must be confirmed during the signed-device probe.
 
 `BattleCardDex.entitlements` declares the container and CloudKit service. Its environment values are build-setting driven:
 
@@ -57,7 +57,7 @@ This explicit split prevents a Debug integration probe from silently resolving P
 - Automated tests and development scripts must never create, modify, or delete Production records.
 - The application-side public catalog protocol exposes reads only. Loader mutation is a separate executable boundary and must require an explicit Development or Production selection; Production operations are outside the initial-build task list.
 
-The shipping entitlement declares `iCloud.com.askcruit.Battle-Card-Dex` and the CloudKit service. `Info.plist` retains `remote-notification` background mode for the selected update mechanism.
+The shipping entitlement declares `iCloud.com.example.BattleCardDex` and the CloudKit service. `Info.plist` retains `remote-notification` background mode for the selected update mechanism.
 
 ## Verification
 

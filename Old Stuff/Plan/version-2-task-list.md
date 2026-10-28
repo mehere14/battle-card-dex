@@ -47,8 +47,8 @@
 
 - [ ] Rename the Xcode project, app target, unit-test target, UI-test target, schemes, product, executable, source directory, app entry point, and test classes.
 - [ ] Set the display name to `Battle Card Dex`.
-- [ ] Set the app bundle ID to `com.askcruit.Battle-Card-Dex` and matching neutral IDs for test targets.
-- [ ] Rename the CloudKit container reference to `iCloud.com.askcruit.Battle-Card-Dex`.
+- [ ] Set the app bundle ID to `com.example.BattleCardDex` and matching neutral IDs for test targets.
+- [ ] Rename the CloudKit container reference to `iCloud.com.example.BattleCardDex`.
 - [ ] Replace authored UI strings, accessibility labels, logs, symbols, comments, filenames, and asset names with neutral terminology.
 - [ ] Do not modify the non-shipping design references except to ensure they have no target membership.
 

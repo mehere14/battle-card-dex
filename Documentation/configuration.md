@@ -10,7 +10,7 @@
 | Motion | Enabled | Disabled for deterministic tests | Enabled |
 | Full catalog | Disabled | Disabled | Disabled until catalog promotion |
 
-All profiles use public container `iCloud.com.askcruit.Battle-Card-Dex`, schema version `1`, manifest record ID `catalog-v1`, and record types `CatalogManifest`, `CreatureCatalogRecord`, `EvolutionCatalogRecord`, and `CardCatalogRecord`.
+All profiles use public container `iCloud.com.example.BattleCardDex`, schema version `1`, manifest record ID `catalog-v1`, and record types `CatalogManifest`, `CreatureCatalogRecord`, `EvolutionCatalogRecord`, and `CardCatalogRecord`.
 
 ## Catalog and cache values
 
