@@ -1,0 +1,5 @@
+// Copy to Local.xcconfig and replace these examples with your own values.
+// Local.xcconfig is ignored; this template must contain no real identifiers.
+APP_DEVELOPMENT_TEAM = YOUR_TEAM_ID
+APP_BUNDLE_IDENTIFIER = com.example.YourApp
+APP_CLOUDKIT_CONTAINER_IDENTIFIER = iCloud.com.example.YourApp

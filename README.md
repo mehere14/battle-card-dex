@@ -19,6 +19,52 @@ This repository is not a self-contained backend: building the app does not popul
 
 Xcode resolves Firebase via Swift Package Manager; the project pins `firebase-ios-sdk` to **12.5.0**. CocoaPods and a direct Gemini API key are not required.
 
+## After cloning: recreate local-only files
+
+A GitHub clone intentionally omits the original developer's Firebase configuration, signing identifiers, credentials, and device state. **Recreate these files locally using your own accounts; keep them ignored by Git.** Do not remove their ignore rules or use `git add -f` to include them.
+
+Run setup commands from the repository root. The copy commands use `-n` to preserve any existing local configuration; edit an existing file instead of replacing it. Start with:
+
+```sh
+cp -n Configuration/Local.xcconfig.example Configuration/Local.xcconfig
+chmod 600 Configuration/Local.xcconfig
+```
+
+Edit `Configuration/Local.xcconfig` before building. Use your Apple Developer team ID, an app bundle ID you own, and the CloudKit container associated with that app. `Configuration/Project.xcconfig` automatically includes this local override; no project-file edits are needed. The checked-in example identifiers do not grant access to a populated catalog.
+
+| Ignored file or directory | When needed | How to recreate it |
+| --- | --- | --- |
+| `Configuration/Local.xcconfig` | Running/signing the native app on your device | Copy the checked-in `.example` file above and fill in your own identifiers. See section 1. |
+| `BattleCardDex/GoogleService-Info.plist` | Live scanner recognition | Register an Apple app in your own Firebase project with the exact local bundle ID, download its configuration, and save it at this exact path. See section 5. |
+| `.env.local` | Running the catalog loader against your CloudKit container | Copy `.env.example`, restrict permissions, and replace placeholders with your own settings. It is not read by the iOS app. See section 3. |
+| CloudKit signing key (`.p8` or `.pem`) | Authenticated loader reads/publication | Create/register your own server-to-server key and store the private file **outside the repository**. Point `.env.local` at its absolute path. The loader rejects private keys inside the repository. |
+| Private `Card Scanner Local` scheme under `xcuserdata` | Optional App Check debug-provider testing | Create a non-shared Debug scheme in Xcode; add only your own local debug-provider environment settings. Normal device scanning uses real attestation and does not require this scheme. |
+| Xcode user state and provisioning profiles | Local Xcode/device setup | Xcode regenerates user state. Configure signing and let Xcode obtain profiles for your own team; do not copy another developer's state. |
+| `.loader-cache/`, `.loader-state/`, `.generated/` | Catalog/artwork administration | The loader and artwork scripts regenerate these. No maintainer cache is required to build the app. See sections 3 and 4 before populating your backend. |
+| `Loader/.build/`, browser `node_modules/` and `dist/` | Building their respective tools | SwiftPM recreates loader build output. In `Design Mockup/`, run `npm ci` and `npm run build` for browser output. |
+
+For the loader, create its separate local configuration only when needed:
+
+```sh
+cp -n .env.example .env.local
+chmod 600 .env.local
+```
+
+Set `BATTLE_CARD_DEX_CLOUDKIT_CONTAINER_IDENTIFIER` to the same container as `APP_CLOUDKIT_CONTAINER_IDENTIFIER`. Replace the Development key ID and private-key path. **Delete unused optional API-key and Production-credential lines**, rather than leaving placeholder values: nonempty placeholders are treated as configured credentials. Supply both Production credential fields only if using a separate destination key; otherwise omit both. Never paste secret values into terminal commands that you intend to share.
+
+For Firebase, keep the downloaded filename exactly `GoogleService-Info.plist` (no numeric download suffix) and place it inside `BattleCardDex/`. This is an Xcode filesystem-synchronized app folder, so a local file there is bundled without adding it to Git. Confirm it appears in the app target's resources/built app. Its `BUNDLE_ID` must match `APP_BUNDLE_IDENTIFIER`; otherwise the scanner reports missing configuration. Firebase provider registration, App Check, and model access still need the setup in section 5.
+
+Confirm the three local configuration files are ignored:
+
+```sh
+git check-ignore Configuration/Local.xcconfig BattleCardDex/GoogleService-Info.plist .env.local
+python3 Scripts/check_repository_privacy.py
+```
+
+`git check-ignore` should list each supplied path. Before committing changes, run the privacy checker again with `--staged`. These commands should never print credential values.
+
+A new clone has no on-device catalog cache or personal library. Populate your own CloudKit catalog before expecting live browsing/scanning to work; install and browse the app to build its local cache. Personal library data is created by saves and synced through the signed-in user's private CloudKit database, not restored from repository files. A scanner fixture UI test can run without live Firebase, but that does not configure a real camera-to-Gemini scan.
+
 ## What each feature needs
 
 | Feature | Required setup |
@@ -33,7 +79,7 @@ Xcode resolves Firebase via Swift Package Manager; the project pins `firebase-io
 ## 1. Configure Apple identifiers and signing
 
 1. Open `Battle Card Dex.xcodeproj` in Xcode and allow package resolution.
-2. Create the ignored `Configuration/Local.xcconfig` alongside the shared `Project.xcconfig`:
+2. Copy `Configuration/Local.xcconfig.example` to the ignored `Configuration/Local.xcconfig` alongside the shared `Project.xcconfig`, then set:
 
    ```xcconfig
    APP_DEVELOPMENT_TEAM = YOUR_TEAM_ID
@@ -74,7 +120,7 @@ The iOS app does not fetch missing structured catalog data directly from upstrea
 2. Create local configuration at the repository root:
 
    ```sh
-   cp .env.example .env.local
+   cp -n .env.example .env.local
    chmod 600 .env.local
    ```
 
@@ -87,7 +133,7 @@ The iOS app does not fetch missing structured catalog data directly from upstrea
    BATTLE_CARD_DEX_CLOUDKIT_PRIVATE_KEY_PATH=/absolute/path/outside/repository/private-key.p8
    ```
 
-   Remove the optional API-key line if unused; do not leave its placeholder as a real value. The key file must be in the signing format expected by `CloudKitRequestSigner`. Process environment values override `.env.local`; CI should inject credentials from its secret store. The loader does not read macOS Keychain.
+   Remove unused optional API-key and Production-credential lines from the copied template; do not leave placeholders as real values. The key file must be in the signing format expected by `CloudKitRequestSigner`. Process environment values override `.env.local`; CI should inject credentials from its secret store. The loader does not read macOS Keychain.
 
 4. From the repository root, run:
 
@@ -203,6 +249,8 @@ Do not add a direct Gemini secret to source or the app bundle. The scanner sends
 
 ### Debug builds
 
+To create a local development scheme, open **Product → Scheme → Manage Schemes** in Xcode, duplicate **Battle Card Dex**, name the copy **Card Scanner Local**, and turn off **Shared**. In **Edit Scheme → Run → Info**, select **Debug**. This selects the Development catalog; the shared scheme's Run action selects Release/Production. Keep this scheme under Xcode's ignored user data. Add environment overrides under **Run → Arguments** only when deliberately testing the debug provider below.
+
 Debug builds use App Attest on supported physical devices and DeviceCheck otherwise, just like Release. They do not require a debug token, including when opened from the Home Screen. CloudKit still uses Development.
 
 For deliberate authentication debugging only, set `BATTLE_CARD_DEX_USE_APP_CHECK_DEBUG_PROVIDER=1` in a private local Debug scheme and register its device-generated debug token in Firebase. An optional `FIRAAppCheckDebugToken` can supply a registered token for that Xcode launch. These environment overrides are absent when opening from the Home Screen, which uses real attestation. Never put debug tokens in shared schemes or documentation.
@@ -245,6 +293,8 @@ Ordinary tests use fakes/fixtures. The **Library Cloud Verification** scheme is 
 Host-only checks include:
 
 ```sh
+python3 Scripts/check_repository_privacy.py
+python3 -m unittest discover -s Scripts -p test_repository_privacy.py
 swift test --package-path Loader
 python3 -m unittest Scripts/test_terminology_compliance.py
 PYTHONPATH=Scripts python3 -m unittest Scripts/test_pack_art_pipeline.py
@@ -304,7 +354,7 @@ The latest recorded device verification is in [Your Library](Documentation/your-
 
 App Attest is compatible with publishing source: it relies on signed app identity and device attestation. Contributors should provision their own backend rather than share the maintainer's quotas or debug access.
 
-Firebase client configuration/API keys are public identifiers, not service-account credentials; backend enforcement and access controls still matter. See the [Firebase security checklist](https://firebase.google.com/support/guides/security-checklist). Supplying your own local plist is recommended for independent development; this repository currently does not ignore that filename, so review staged changes before committing it.
+Firebase client configuration/API keys are public identifiers, not service-account credentials; backend enforcement and access controls still matter. See the [Firebase security checklist](https://firebase.google.com/support/guides/security-checklist). This repository intentionally ignores the downloaded Firebase plist. Recreate it locally using your own Firebase project as described under “After cloning”; keep the ignore rule in place.
 
 Never commit App Check debug tokens, `.env.local`, Apple/CloudKit private keys, signing credentials, service-account JSON, or direct Gemini secrets. Existing ignore rules cover several of these paths but do not remove secrets already committed. Review staged files and history before publication; revoke exposed credentials rather than only deleting their files. Shared schemes must contain no private launch tokens.
 
