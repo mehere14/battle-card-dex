@@ -23,20 +23,47 @@ actor SwiftDataLocalCatalogStore: LocalCatalogStore {
         self.now = now
     }
 
+    /// Seed the first SwiftUI frame from validated local rows. Decode only the
+    /// summary fields; full profiles and their text validation load asynchronously.
+    @MainActor
+    static func startupSummaries(container: ModelContainer) throws -> [CreatureSummary] {
+        let context = ModelContext(container)
+        let rows = try context.fetch(FetchDescriptor<CachedCreature>(sortBy: [SortDescriptor(\.sortIndex)]))
+        let decoder = JSONDecoder()
+        return rows.compactMap { row in
+            guard let envelope = try? decoder.decode(CatalogPersistenceEnvelope.self, from: row.encodedPayload),
+                  envelope.schemaVersion == 1, envelope.kind == .creature else { return nil }
+            return try? decoder.decode(CreatureSummary.self, from: envelope.payload)
+        }
+    }
+
+    func fetchPrimaryCatalog() async throws -> ServiceResponse<[CatalogDocument]> {
+        let context = ModelContext(container)
+        var documents: [CatalogDocument] = []
+        for row in try context.fetch(FetchDescriptor<CachedCatalogManifest>()) {
+            documents.append(.init(identifier: row.recordIdentifier, payload: row.encodedPayload, contentHash: row.contentHash))
+        }
+        for row in try context.fetch(FetchDescriptor<CachedCreature>()) {
+            documents.append(.init(identifier: row.recordIdentifier, payload: row.encodedPayload, contentHash: row.contentHash))
+        }
+        return ServiceResponse(value: documents.sorted { $0.identifier < $1.identifier })
+    }
+
     func fetch(_ query: CatalogQuery) async throws -> ServiceResponse<[CatalogDocument]> {
         let context = ModelContext(container)
         let requested = Set(query.identifiers)
+        let identifiers = query.identifiers
         var documents: [CatalogDocument] = []
-        for row in try context.fetch(FetchDescriptor<CachedCatalogManifest>()) where requested.isEmpty || requested.contains(row.recordIdentifier) {
+        for row in try context.fetch(FetchDescriptor<CachedCatalogManifest>(predicate: requested.isEmpty ? nil : #Predicate { identifiers.contains($0.recordIdentifier) })) {
             documents.append(.init(identifier: row.recordIdentifier, payload: row.encodedPayload, contentHash: row.contentHash))
         }
-        for row in try context.fetch(FetchDescriptor<CachedCreature>()) where requested.isEmpty || requested.contains(row.recordIdentifier) {
+        for row in try context.fetch(FetchDescriptor<CachedCreature>(predicate: requested.isEmpty ? nil : #Predicate { identifiers.contains($0.recordIdentifier) })) {
             documents.append(.init(identifier: row.recordIdentifier, payload: row.encodedPayload, contentHash: row.contentHash))
         }
-        for row in try context.fetch(FetchDescriptor<CachedEvolutionChain>()) where requested.isEmpty || requested.contains(row.recordIdentifier) {
+        for row in try context.fetch(FetchDescriptor<CachedEvolutionChain>(predicate: requested.isEmpty ? nil : #Predicate { identifiers.contains($0.recordIdentifier) })) {
             documents.append(.init(identifier: row.recordIdentifier, payload: row.encodedPayload, contentHash: row.contentHash))
         }
-        for row in try context.fetch(FetchDescriptor<CachedCard>()) where requested.isEmpty || requested.contains(row.recordIdentifier) {
+        for row in try context.fetch(FetchDescriptor<CachedCard>(predicate: requested.isEmpty ? nil : #Predicate { identifiers.contains($0.recordIdentifier) })) {
             documents.append(.init(identifier: row.recordIdentifier, payload: row.encodedPayload, contentHash: row.contentHash))
         }
         documents.sort { $0.identifier < $1.identifier }

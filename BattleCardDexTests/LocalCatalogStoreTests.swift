@@ -34,6 +34,28 @@ struct LocalCatalogStoreTests {
         #expect(try await store.statistics() == .init(manifests: 0, creatures: 0, evolutionChains: 0, cards: 0))
     }
 
+    @Test @MainActor
+    func startupSummariesAreAvailableSynchronouslyFromSavedRows() async throws {
+        let container = try LocalCatalogContainer.make(isStoredInMemoryOnly: true)
+        let store = SwiftDataLocalCatalogStore(container: container)
+        let documents = try [
+            document(creature(id: 2, name: "river-runner", generation: "generation-2", types: ["water"]), id: "catalog-creature-2", hash: "c2"),
+            document(creature(id: 1, name: "seed-creature", generation: "generation-1", types: ["leaf"]), id: "catalog-creature-1", hash: "c1"),
+            document(card(id: "set-a-007", related: [1], name: "Seed Creature", number: "007"), id: "catalog-card-7", hash: "b1"),
+        ]
+        try await store.replace(documents)
+        let summaries = try SwiftDataLocalCatalogStore.startupSummaries(container: container)
+        let model = CatalogViewModel(initialCreatures: summaries)
+        // No load task or network response is needed for the first screen.
+        #expect(model.state == .ready)
+        #expect(model.creatures.map(\.id) == [1, 2])
+        #expect(model.creatures.map(\.displayName) == summaries.map(\.displayName))
+        #expect(model.creatures.first?.types == ["leaf"])
+        #expect(model.profiles.isEmpty)
+        let primary = try await store.fetchPrimaryCatalog()
+        #expect(primary.value.map(\.identifier) == ["catalog-creature-1", "catalog-creature-2"])
+    }
+
     @Test func upsertSkipsUnchangedAndLastDuplicateWins() async throws {
         let container = try LocalCatalogContainer.make(isStoredInMemoryOnly: true)
         let clock = LockedClock(Date(timeIntervalSince1970: 100))

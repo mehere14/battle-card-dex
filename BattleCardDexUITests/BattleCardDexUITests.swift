@@ -8,6 +8,34 @@
 import XCTest
 
 final class BattleCardDexUITests: XCTestCase {
+    @MainActor
+    func testCachedCatalogAndRelatedCardsSurviveRelaunch() throws {
+        let app = XCUIApplication()
+        app.launch()
+        let bulbasaur = app.buttons["Bulbasaur, number 1"].firstMatch
+        XCTAssertTrue(bulbasaur.waitForExistence(timeout: 60))
+        bulbasaur.tap()
+        app.buttons["Open Cards"].tap()
+        let panel = app.descendants(matching: .any)["related-cards-panel"].firstMatch
+        XCTAssertTrue(panel.waitForExistence(timeout: 5))
+        let card = panel.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Bulbasaur,")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 60))
+        let disappeared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: card)
+        disappeared.isInverted = true
+        XCTAssertEqual(XCTWaiter.wait(for: [disappeared], timeout: 8), .completed)
+        keepScreenshot(named: "Related cards remain visible after refresh")
+        app.terminate()
+        app.launch()
+        // A warm launch must have data in its first screen, not eventually
+        // populate after a multi-second full-cache decode.
+        XCTAssertTrue(bulbasaur.exists, "Cached Pokémon must be present as soon as the relaunched app is ready")
+        XCTAssertFalse(app.staticTexts["Loading catalog…"].exists)
+        keepScreenshot(named: "Cached catalog on first screen after relaunch")
+        bulbasaur.tap()
+        app.buttons["Open Cards"].tap()
+        XCTAssertTrue(card.waitForExistence(timeout: 10))
+    }
+
     func testPackTabOpensSelectedTenCardPack() throws {
         let app = XCUIApplication()
         app.launchEnvironment["BATTLE_CARD_DEX_USE_PREVIEW"] = "1"

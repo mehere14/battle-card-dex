@@ -7,7 +7,7 @@ import Testing
 struct CatalogViewModelTests {
     @Test func coldCatalogDefersEvolutionAndCardsUntilDetailIsRequested() async throws {
         let catalog = try makeCatalog()
-        let local = FakeLocalCatalogStore(states: [.empty, .empty])
+        let local = FakeLocalCatalogStore(states: [.empty, .empty, .empty])
         let publicStore = FakePublicCatalogStore(states: [
             .success(catalog.primaryDocuments),
             .success(catalog.relatedDocuments.filter { document in
@@ -46,7 +46,7 @@ struct CatalogViewModelTests {
         let updatedCatalog = try makeCatalog(cardName: "Updated Card", changedCardIdentifier: "catalog-card-1")
         let local = FakeLocalCatalogStore(states: [
             .success(oldCatalog.primaryDocuments),
-            .success([oldCatalog.manifest]),
+            .success([oldCatalog.manifest]), .empty,
         ])
         let publicStore = FakePublicCatalogStore(states: [
             .success([updatedCatalog.manifest]),
@@ -67,9 +67,87 @@ struct CatalogViewModelTests {
         ])
     }
 
+    @Test func startupSummaryCanOpenCardsBeforeBootstrap() async throws {
+        let catalog = try makeCatalog()
+        let savedCreature = try #require(catalog.primaryDocuments.first { $0.identifier == "catalog-creature-1" })
+        let summary = try savedCreature.persistedEnvelope().decode(CatalogCreaturePayload.self).domainValue().summary
+        let details = catalog.relatedDocuments.filter {
+            $0.identifier == "catalog-evolution-1" ||
+            ($0.identifier.hasPrefix("catalog-card-") &&
+             (Int($0.identifier.dropFirst("catalog-card-".count))! - 1) % 30 == 0)
+        }
+        let local = FakeLocalCatalogStore(states: [.success([savedCreature]), .success(details)])
+        let remote = FakePublicCatalogStore(states: [])
+        let model = CatalogViewModel(
+            coordinator: CatalogCoordinator(local: local, publicStore: remote),
+            automaticallyWarmDetails: false, initialCreatures: [summary]
+        )
+        #expect(model.creatures == [summary])
+        await model.loadDetails(for: [1])
+        #expect(model.cards(for: 1).count == 35)
+        #expect(model.profile(for: 1) != nil)
+        #expect(model.detailStatus(for: 1).cards == .loaded)
+        #expect(await remote.receivedQueries.isEmpty)
+    }
+
+    @Test func launchShowsPartialCacheBeforeNetworkCompletes() async throws {
+        let catalog = try makeCatalog()
+        let cachedCreature = try #require(catalog.primaryDocuments.first { $0.identifier == "catalog-creature-1" })
+        let local = FakeLocalCatalogStore(states: [.success([cachedCreature]), .empty])
+        let store = SuspendedManifestStore(manifest: catalog.manifest, details: catalog.primaryDocuments)
+        let model = CatalogViewModel(
+            coordinator: CatalogCoordinator(local: local, publicStore: store),
+            automaticallyWarmDetails: false
+        )
+        let launch = Task { await model.load() }
+        await store.waitForManifestRequest()
+        #expect(model.creatures.map(\.id) == [1])
+        #expect(model.state == .ready)
+        #expect(model.refreshStatus == .checking)
+        await store.finishManifestRequest()
+        await launch.value
+        #expect(model.creatures.count == 30)
+        #expect(model.refreshStatus == .idle)
+    }
+
+    @Test(arguments: [false, true])
+    func manifestRefreshPreservesDetailsLoadedWhileRefreshIsWaiting(compactManifest: Bool) async throws {
+        let catalog = try makeCatalog(compactManifest: compactManifest)
+        let details = catalog.relatedDocuments.filter {
+            $0.identifier == "catalog-evolution-1" ||
+            ($0.identifier.hasPrefix("catalog-card-") &&
+             (Int($0.identifier.dropFirst("catalog-card-".count))! - 1) % 30 == 0)
+        }
+        let store = SuspendedManifestStore(manifest: catalog.manifest, details: details)
+        let local = FakeLocalCatalogStore(states: [
+            .success(catalog.primaryDocuments), .success([catalog.manifest]), .empty,
+            .success(catalog.relatedDocuments),
+        ])
+        let model = CatalogViewModel(
+            coordinator: CatalogCoordinator(local: local, publicStore: store),
+            automaticallyWarmDetails: false
+        )
+        await model.bootstrap()
+        let refresh = Task { await model.refreshCatalog() }
+        await store.waitForManifestRequest()
+        await model.loadDetails(for: [1])
+        #expect(model.cards(for: 1).count == 35)
+        await store.finishManifestRequest()
+        await refresh.value
+        #expect(model.cards(for: 1).count == 35)
+        #expect(model.evolutionChain(for: 1) != nil)
+        #expect(model.detailStatus(for: 1).cards == .loaded)
+        await model.loadDetails(for: [1])
+        #expect(model.cards(for: 1).count == 35)
+        #expect(await store.detailRequestCount == 1)
+        let retained = try #require(await local.retainedIdentifierSets.last)
+        #expect(retained.contains("catalog-card-2")) // Disk-only card, never opened this launch.
+    }
+
     private func makeCatalog(
         cardName: String = "Card",
-        changedCardIdentifier: String? = nil
+        changedCardIdentifier: String? = nil,
+        compactManifest: Bool = false
     ) throws -> FixtureCatalog {
         let creatures = try (1...30).map { id in
             try document(
@@ -105,7 +183,8 @@ struct CatalogViewModelTests {
             )
         }
         let records = creatures + evolutions + cards
-        let hashes = Dictionary(uniqueKeysWithValues: records.map { ($0.identifier, $0.contentHash) })
+        let indexedRecords = compactManifest ? creatures + evolutions : records
+        let hashes = Dictionary(uniqueKeysWithValues: indexedRecords.map { ($0.identifier, $0.contentHash) })
         let manifestPayload = CatalogManifestPayload(
             schemaVersion: 1, id: "catalog-manifest", revision: changedCardIdentifier == nil ? 1 : 2,
             publishedAt: Date(timeIntervalSince1970: changedCardIdentifier == nil ? 1 : 2),
@@ -150,4 +229,42 @@ private struct FixtureCatalog {
     let manifest: CatalogDocument
     let primaryDocuments: [CatalogDocument]
     let relatedDocuments: [CatalogDocument]
+}
+
+private actor SuspendedManifestStore: PublicCatalogStore {
+    let manifest: CatalogDocument
+    let details: [CatalogDocument]
+    private var manifestContinuation: CheckedContinuation<Void, Never>?
+    private var startedContinuation: CheckedContinuation<Void, Never>?
+    private(set) var detailRequestCount = 0
+
+    init(manifest: CatalogDocument, details: [CatalogDocument]) {
+        self.manifest = manifest
+        self.details = details
+    }
+
+    func fetch(_ query: CatalogQuery) async throws -> ServiceResponse<[CatalogDocument]> {
+        if query.identifiers.contains(manifest.identifier) {
+            await withCheckedContinuation { continuation in
+                manifestContinuation = continuation
+                startedContinuation?.resume()
+                startedContinuation = nil
+            }
+            return ServiceResponse(value: [manifest] + details.filter {
+                $0.identifier != manifest.identifier && query.identifiers.contains($0.identifier)
+            })
+        }
+        detailRequestCount += 1
+        return ServiceResponse(value: details.filter { query.identifiers.contains($0.identifier) })
+    }
+
+    func waitForManifestRequest() async {
+        if manifestContinuation != nil { return }
+        await withCheckedContinuation { startedContinuation = $0 }
+    }
+
+    func finishManifestRequest() {
+        manifestContinuation?.resume()
+        manifestContinuation = nil
+    }
 }

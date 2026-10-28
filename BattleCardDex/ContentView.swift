@@ -134,11 +134,11 @@ private struct CatalogHomeView: View {
     @ViewBuilder
     private func creatureContent(width: CGFloat) -> some View {
         switch model.state {
-        case .emptyInstall:
+        case .emptyInstall where model.creatures.isEmpty:
             ServiceStateView(title: "Catalog warming up", message: "The shared catalog is ready to download.", action: "Try Again") { Task { await model.retry() } }
-        case .offline:
+        case .offline where model.creatures.isEmpty:
             ServiceStateView(title: "Catalog unavailable", message: "Connect to the internet, then try again.", action: "Retry") { Task { await model.retry() } }
-        case .incompatibleSchema:
+        case .incompatibleSchema where model.creatures.isEmpty:
             ServiceStateView(title: "Catalog update required", message: "This version cannot read the published catalog yet.", action: "Retry") { Task { await model.retry() } }
         case .loading where filteredCreatures.isEmpty:
             ProgressView("Loading catalog…").frame(maxWidth: .infinity, minHeight: 240)

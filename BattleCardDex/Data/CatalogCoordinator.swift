@@ -51,6 +51,19 @@ actor CatalogCoordinator {
         self.publicStore = publicStore
     }
 
+    /// Read the installed catalog without waiting for any network requests.
+    func cachedCatalog() async -> CatalogCoordinatorSnapshot {
+        if let response = try? await local.fetchPrimaryCatalog() {
+            for document in response.value where memory[document.identifier] == nil {
+                memory[document.identifier] = document
+            }
+        }
+        return CatalogCoordinatorSnapshot(
+            state: .ready, documents: memory.values.sorted { $0.identifier < $1.identifier },
+            failedIdentifiers: [], servedFromCache: true
+        )
+    }
+
     func load(identifiers: [String]) async -> CatalogCoordinatorSnapshot {
         let key = Self.requestKey(identifiers)
         if let inFlight = inFlight[key] { return await inFlight.value }
@@ -143,9 +156,23 @@ actor CatalogCoordinator {
 
     func clearMemory() { memory.removeAll() }
 
-    func retain(identifiers: Set<String>) async {
-        memory = memory.filter { identifiers.contains($0.key) }
-        try? await local.retain(identifiers: identifiers)
+    func retain(identifiers: Set<String>, preservingCards: Bool = false) async {
+        guard preservingCards else {
+            memory = memory.filter { identifiers.contains($0.key) }
+            try? await local.retain(identifiers: identifiers)
+            return
+        }
+        // Cards are queried independently and omitted from compact manifests.
+        // Keep their disk cache when pruning the manifest-indexed catalog.
+        // If the cache cannot be read, defer cleanup rather than risk removing
+        // card records whose identifiers we could not inspect.
+        guard let response = try? await local.fetch(CatalogQuery(identifiers: [])) else { return }
+        let cardIdentifiers = (response.value + Array(memory.values)).filter {
+            Self.recordType(of: $0) == CloudCatalogRecordContract.RecordType.card
+        }.map(\.identifier)
+        let retained = identifiers.union(cardIdentifiers)
+        memory = memory.filter { retained.contains($0.key) }
+        try? await local.retain(identifiers: retained)
     }
 
     private nonisolated static func recordType(of document: CatalogDocument) -> String? {

@@ -80,10 +80,17 @@ extension PublicCatalogQueryStore {
 }
 
 nonisolated protocol LocalCatalogStore: Sendable {
+    func fetchPrimaryCatalog() async throws -> ServiceResponse<[CatalogDocument]>
     func fetch(_ query: CatalogQuery) async throws -> ServiceResponse<[CatalogDocument]>
     func replace(_ documents: [CatalogDocument]) async throws
     func removeAll() async throws
     func retain(identifiers: Set<String>) async throws
+}
+
+extension LocalCatalogStore {
+    func fetchPrimaryCatalog() async throws -> ServiceResponse<[CatalogDocument]> {
+        try await fetch(CatalogQuery(identifiers: []))
+    }
 }
 
 nonisolated protocol ImageRepository: Sendable {

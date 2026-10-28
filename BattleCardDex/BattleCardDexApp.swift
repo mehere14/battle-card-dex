@@ -32,7 +32,8 @@ struct BattleCardDexApp: App {
                 manifestRecordIdentifier: appConfiguration.cloudCatalog.manifestRecordIdentifier,
                 imageRepository: dependencies.images,
                 cardSetIndexRepository: dependencies.cardSetIndexes,
-                packArtworkRepository: dependencies.packArtwork
+                packArtworkRepository: dependencies.packArtwork,
+                initialCreatures: (try? SwiftDataLocalCatalogStore.startupSummaries(container: container)) ?? []
             ))
         } catch {
             fatalError("Could not create ModelContainer: \(error)")

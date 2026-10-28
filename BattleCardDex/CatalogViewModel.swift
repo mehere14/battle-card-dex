@@ -70,7 +70,8 @@ final class CatalogViewModel: ObservableObject {
          automaticallyWarmDetails: Bool = true,
          imageRepository: (any ImageRepository)? = nil,
          cardSetIndexRepository: CardSetIndexRepository? = nil,
-         packArtworkRepository: PackArtworkRepository? = nil) {
+         packArtworkRepository: PackArtworkRepository? = nil,
+         initialCreatures: [CreatureSummary] = []) {
         self.coordinator = coordinator
         self.supportedRange = supportedRange
         self.manifestRecordIdentifier = manifestRecordIdentifier
@@ -78,6 +79,8 @@ final class CatalogViewModel: ObservableObject {
         self.imageRepository = imageRepository
         self.cardSetIndexRepository = cardSetIndexRepository
         self.packArtworkRepository = packArtworkRepository
+        self.creatures = initialCreatures.sorted { $0.id < $1.id }
+        if !initialCreatures.isEmpty { self.state = .ready }
     }
 
     static func preview() -> CatalogViewModel {
@@ -162,9 +165,17 @@ final class CatalogViewModel: ObservableObject {
 
     private func performDetailLoad(for creatureID: Int) async {
         guard let coordinator else { return }
-        guard let document = loadedDocuments["catalog-creature-\(creatureID)"],
+        let creatureIdentifier = "catalog-creature-\(creatureID)"
+        // The launcher can now be used before the full bootstrap finishes.
+        // Resolve a tapped creature directly instead of silently dropping it.
+        if loadedDocuments[creatureIdentifier] == nil {
+            let snapshot = await coordinator.load(identifiers: [creatureIdentifier])
+            for document in snapshot.documents { loadedDocuments[document.identifier] = document }
+        }
+        guard let document = loadedDocuments[creatureIdentifier],
               let envelope = try? document.persistedEnvelope(),
               let creature = try? envelope.decode(CatalogCreaturePayload.self) else { return }
+        profiles[creatureID] = creature.domainValue()
         let cardIDs = creature.cardRecordIdentifiers ?? []
         let evolutionIDs = [creature.evolutionRecordIdentifier].compactMap { $0 }
         var status = detailStatuses[creatureID] ?? CreatureDetailStatus()
@@ -208,7 +219,19 @@ final class CatalogViewModel: ObservableObject {
 
     private func loadCachedCatalog() async {
         guard let coordinator else { state = creatures.isEmpty ? .emptyInstall : .ready; return }
-        state = .loading
+        if creatures.isEmpty { state = .loading }
+        // Publish the installed catalog before filling any cache misses online.
+        // A partial cache must remain usable while CloudKit is being checked.
+        let cached = await coordinator.cachedCatalog()
+        let cachedPrimary = cached.documents.filter {
+            $0.identifier == manifestRecordIdentifier || $0.identifier.hasPrefix("catalog-creature-")
+        }
+        if !cachedPrimary.isEmpty {
+            for document in cachedPrimary { loadedDocuments[document.identifier] = document }
+            // Cards remain in the coordinator cache and decode on demand, so a
+            // large card collection cannot delay the cached Pokémon grid.
+            await apply(documents: Array(loadedDocuments.values), state: .ready)
+        }
         let primaryIdentifiers = [manifestRecordIdentifier] + supportedRange.map { "catalog-creature-\($0)" }
         let fetch: ([String]) async -> CatalogCoordinatorSnapshot = { ids in
             await coordinator.load(identifiers: ids)
@@ -242,8 +265,8 @@ final class CatalogViewModel: ObservableObject {
 #endif
         let snapshot = Self.combined(primarySnapshot, relatedSnapshot, cardSnapshot)
         let allDocuments = Self.mergedDocuments([primarySnapshot.documents, relatedSnapshot.documents, cardSnapshot.documents])
-        loadedDocuments = Dictionary(uniqueKeysWithValues: allDocuments.map { ($0.identifier, $0) })
-        await apply(documents: allDocuments, state: snapshot.state)
+        for document in allDocuments { loadedDocuments[document.identifier] = document }
+        await apply(documents: Array(loadedDocuments.values), state: snapshot.state)
         bootstrapNeedsRemoteCheck = primarySnapshot.servedFromCache && relatedSnapshot.servedFromCache
         scheduleDetailWarmup()
 
@@ -269,6 +292,8 @@ final class CatalogViewModel: ObservableObject {
         let currentByIdentifier = Dictionary(uniqueKeysWithValues: allDocuments.map { ($0.identifier, $0) })
         let changedIdentifiers = refreshedManifest.contentHashes.keys.filter { identifier in
             guard identifier != manifestRecordIdentifier else { return false }
+            // Unopened details stay lazy; refresh details only once cached.
+            guard identifier.hasPrefix("catalog-creature-") || currentByIdentifier[identifier] != nil else { return false }
             return currentByIdentifier[identifier]?.contentHash != refreshedManifest.contentHashes[identifier]
         }.sorted()
         let changedSnapshot = changedIdentifiers.isEmpty
@@ -276,23 +301,39 @@ final class CatalogViewModel: ObservableObject {
             : await coordinator.refresh(identifiers: changedIdentifiers)
         let snapshot = Self.combined(refreshedManifestSnapshot, changedSnapshot)
 
-        let expectedIdentifiers = Set(refreshedManifest.contentHashes.keys).union([manifestRecordIdentifier])
-        var refreshedDocuments = Dictionary(uniqueKeysWithValues: allDocuments.map { ($0.identifier, $0) })
+        // Published manifests intentionally omit card hashes to fit CloudKit's
+        // record size limit. Absence there does not mean a card was deleted.
+        let cardIdentifiers = loadedDocuments.values.filter {
+            (try? $0.persistedEnvelope().kind) == .card
+        }.map(\.identifier)
+        let expectedIdentifiers = Set(refreshedManifest.contentHashes.keys)
+            .union([manifestRecordIdentifier]).union(cardIdentifiers)
+        guard snapshot.failedIdentifiers.isEmpty else { refreshStatus = .failed; return }
+        await coordinator.retain(identifiers: expectedIdentifiers, preservingCards: true)
+        // Detail requests can finish while the manifest and changed records load.
+        // Commit against the latest documents, not the pre-refresh snapshot.
+        var refreshedDocuments = loadedDocuments
         for document in refreshedManifestSnapshot.documents + changedSnapshot.documents {
             refreshedDocuments[document.identifier] = document
         }
         let finalDocuments = refreshedDocuments.values
-            .filter { expectedIdentifiers.contains($0.identifier) }
+            .filter { expectedIdentifiers.contains($0.identifier) || (try? $0.persistedEnvelope().kind) == .card }
             .sorted { $0.identifier < $1.identifier }
-        guard snapshot.failedIdentifiers.isEmpty else { refreshStatus = .failed; return }
-        await coordinator.retain(identifiers: expectedIdentifiers)
         loadedDocuments = Dictionary(uniqueKeysWithValues: finalDocuments.map { ($0.identifier, $0) })
         await apply(documents: finalDocuments, state: snapshot.state)
         refreshStatus = changedIdentifiers.isEmpty ? .idle : .updated
     }
 
     private func apply(documents: [CatalogDocument], state coordinatorState: CatalogCoordinatorState) async {
-        let decoded = await Task.detached(priority: .userInitiated) { Self.decode(documents: documents) }.value
+        var source = Dictionary(documents.map { ($0.identifier, $0) }, uniquingKeysWith: { _, latest in latest })
+        var decoded = await Task.detached(priority: .userInitiated) { Self.decode(documents: documents) }.value
+        // Decoding also yields the main actor. Include details that arrived during
+        // that work before replacing the published collections.
+        while !loadedDocuments.isEmpty && source != loadedDocuments {
+            source = loadedDocuments
+            let latest = Array(source.values)
+            decoded = await Task.detached(priority: .userInitiated) { Self.decode(documents: latest) }.value
+        }
         creatures = decoded.summaries
         profiles = decoded.profiles
         evolutions = decoded.evolutions
@@ -336,6 +377,7 @@ final class CatalogViewModel: ObservableObject {
     }
 
     private func mergeDetails(from documents: [CatalogDocument]) async {
+        for document in documents { loadedDocuments[document.identifier] = document }
         let decoded = await Task.detached(priority: .userInitiated) { Self.decode(documents: documents) }.value
         var updatedEvolutions = evolutions
         var updatedCards = Dictionary(uniqueKeysWithValues: cards.map { ($0.id, $0) })
